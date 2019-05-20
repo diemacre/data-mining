@@ -1,0 +1,326 @@
+---
+title: "Homework 4 of CS 422: Section 04"
+author: "Diego Martin Crespo, A20432558"
+output: 
+  html_notebook:
+    toc: true
+    toc_float:
+        smoth_scrooll: true
+---
+# 2 Practical Problems
+## 2.1 Locality sensitive hashing
+
+We start by creating the files
+```{r}
+dir=getwd()
+ratings<-read.csv(paste0(dir,'/ml-latest-small/ratings.csv'), sep=',', header=T, stringsAsFactors = F)
+movies<-read.csv(paste0(dir,'/ml-latest-small/movies.csv'), sep=',', header=T, stringsAsFactors = F, encoding="UTF-8")
+path<-paste0(dir,'/hw4.movies')
+
+if(dir.exists(path)==FALSE){dir.create(path)}
+files<-list.files(path, full.names = T)
+
+#We use sql queries to obtain the information and import it into a file
+library('sqldf')
+sqlStr<-'SELECT ratings.userId, movies.title 
+        FROM ratings INNER JOIN movies ON ratings.movieId==movies.movieId'
+moviesAndRatings<-sqldf(sqlStr)
+
+#We are going to see how many unique users we have:
+sqlStr<-'SELECT DISTINCT userId FROM moviesAndRatings'
+users<-sqldf(sqlStr)
+
+#We do this so that the files are only created once
+library(gsubfn)
+library(proto)
+if(sum(file.exists(files))!=length(users$userId)){
+  for(i in 1:length(users$userId)){
+    setwd(path) #We change the directory so that all the files are created there
+    index<-which(moviesAndRatings$userId==users$userId[i])
+    name<-paste0('user', i, '.txt')
+    write(moviesAndRatings$title[index], file=name, sep='\t')
+  }
+files<-list.files(path, full.names = T)
+}
+```
+```{r}
+library(textreuse)
+corpus <- TextReuseCorpus(files, tokenizer = tokenize_ngrams, n = 5, keep_tokens = TRUE)
+```
+
+### a) what is the size (rows and columns) of our characteristic matrix?
+```{r}
+col<-nrow(users) 
+cat('There are' , col, 'columns and ' , sum(lengths(unique(tokens(corpus)))), 'rows')
+```
+
+### b)
+#### i) How many movies has this user rated?
+```{r}
+library(stringr)
+user20 <- corpus[["user20"]]
+n<-str_count(user20, '\n')+1 #We add one to take into consideration the last movie of the list
+cat('The number of movies that user20 rated was: ', n)
+```
+#### ii) What are the first five shingles (tokens) for this user?
+```{r}
+tokens(user20)[1:5]
+```
+
+### c) Let's find similar users using the brute-force pairwise method first.
+```{r}
+compMatrix<-pairwise_compare(corpus,jaccard_similarity)
+candidate_matches<-pairwise_candidates(compMatrix)
+```
+#### i) How many pairs of users have a similarity score of at least 0.60?
+```{r}
+cat('There are', sum(candidate_matches$score>=0.6), 'users')
+```
+#### ii) How many pairs of users have a similarity score of at least 0.50?
+```{r}
+cat('There are', sum(candidate_matches$score>=0.5), 'users')
+```
+#### iii) How many pairs of users have a similarity score of at least 0.40?
+```{r}
+cat('There are', sum(candidate_matches$score>=0.4), 'users')
+```
+#### iv) List all the pair of users who have a similarity score of at least 0.40.
+```{r}
+candidate_matches[which(candidate_matches$score>=0.4), 1:2]
+```
+### d)
+#### i) Find the minimum number of minhash signatures and LSH bands to determine the probability that a pair ofdocuments with a Jaccard similarity, s, of 0.60 will be detected with a probability of at least 98%.
+```{r}
+lsh_probability(h=5,b=5, s=0.6)
+```
+Number of minhash signatures is 5 and the number of LSH bands is 5
+
+#### ii) Create a minhash_generator() using the value of the number of minhash signatures determined in (i) above.
+```{r}
+minhash <- minhash_generator(n=5, seed=100)
+corpus<-TextReuseCorpus(files, tokenizer = tokenize_ngrams, n = 5, minhash_func = minhash, keep_tokens = TRUE)
+```
+```{r}
+user20 <- corpus[["user20"]]
+tokens(user20)[1:5]
+```
+### e) 
+#### i) Do you expect to find candidate pairs that have a Jaccard similarity between 0.60 and 0.50?
+```{r}
+lsh_threshold(h=5,b=5)
+```
+
+So between 0.2 and 0.6 we are in the zone where we can get False negatives. Since s=0.5 to 0.6 has a high probability it means that we are almost certain that we are only going to get documents that are similar. Since we didn't get any candidate pairs with the brute force method we are not likely to find candidate pairs applying LSH
+```{r}
+buckets<-lsh(corpus, bands = 5)
+candidates <- lsh_candidates(buckets)
+candidates_res <- lsh_compare(candidates, corpus, jaccard_similarity)
+```
+
+```{r}
+sum((candidates_res$score>=0.5))
+```
+#### ii) List all the pairs of users who have a similarity score of at least 0.40
+```{r}
+candidates_res[which(candidates_res$score>=0.4), 1:2]
+```
+8990 comparisons where made
+#### iii) Note the number of comparisons made.Are they the same as the ones found in (c)(iv) above?
+No, with LSH there were 8990 comparisons while brute force did 224785.
+
+#### iv) Compared to the number of comparisons in (c), how much work was saved by LSH (in percentage terms)?
+```{r}
+cat('We saved', (length(candidate_matches$score)-length(candidates_res$score))/length(candidate_matches$score)*100, '% of the work')
+```
+
+## 2.2 Content-based recommendation system
+First, the user who's profile we are going to create is calculated
+```{r}
+number<-20432558%%671
+cat('I have this user', number)
+```
+First we create the user profile:
+```{r}
+#First we are going to separate each movie in its genre
+
+library(splitstackshape)
+#movies<-cSplit(movies, "genres", sep="|")
+genres<-c("Action", "Adventure", "Animation", "Children", "Comedy", "Crime", "Documentary", "Drama", "Fantasy","Film-Noir", "Horror", "IMAX", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western", "(no genres listed)")
+
+sqlStr<-'SELECT movies.* 
+        FROM ratings INNER JOIN movies ON ratings.movieId==movies.movieId
+        WHERE userId=608'
+user608<-sqldf(sqlStr)
+#movie_genres<-strsplit(user608$genres, split="|", fixed=TRUE)
+movie_genres<-cSplit(user608, "genres", sep="|", type.convert = FALSE)
+movies_u608<-user608[,1:2]
+movies_u608[,genres]<-0
+movies_u608<-movies_u608[,-c(1,2)]
+
+for(i in 1:dim.data.frame(movie_genres)[1]){
+  index<-which(genres%in%movie_genres[i,])
+  movies_u608[i,index]<-1
+}
+profile_u608<-apply(movies_u608, MARGIN = 2, mean)
+```
+Now we create the movie profile:
+```{r}
+#First we create the 10 samples:
+set.seed(1122)
+movieID<-sample(movies$movieId, size=10)
+movie_genres<-movies[movies$movieId%in%movieID,]
+movie_genres<-cSplit(movie_genres, "genres", sep="|", type.convert = FALSE)
+movie_matrix<-movie_genres[,1:2]
+movie_matrix[,genres]<-0
+
+for(i in 1:dim.data.frame(movie_matrix)[1]){
+  index<-which(genres%in%movie_genres[i,])+2 #We kept the movieId and title 
+  movie_matrix[i,index]<-1
+}
+```
+Now we are going to use cosine similarity to see the recomendations that we would give this user
+```{r}
+my.cosine<-function(x,y){
+  x<-as.vector(x)
+  y<-as.vector(y)
+  return(sum(x*y)/(norm(x, type="2")*norm(y, type="2")))
+}
+recommendation<-movie_matrix[,1:2]
+recommendation[,"similarity"]<-0
+
+#ask mapply and remove the for
+#mapply(my.cos, movie_matrix[,3:22], profile_u304)
+for(i in 1:dim.data.frame(movie_matrix)[1]){
+  recommendation$similarity[i]<-my.cosine(movie_matrix[i, 3:22], profile_u608)
+}
+recommendation<-recommendation[order(recommendation$similarity, decreasing=TRUE),]
+cat('The ID', number, 'chose the following 10 movies:', recommendation$movieId, '\n')
+cat('Of these the following 5 movies are recommended:\n')
+print(head(recommendation, n=5))
+
+for(i in 1:5){
+  cat('MovieId:',recommendation$movieId[i],', MovieName:', recommendation$title[i], ', Similarity:', recommendation$similarity[i], '\n')
+}
+```
+
+## 2.3 Collaborative Filtering
+First we are going to get the data regarding userID191
+
+```{r}
+userId<-c(513,317,415,375,64,556,82,225,657,266,568,50)
+JaccardSimilarity<-c(0.4358974, 0.4033613,0.3255814,0.3049645,0.2753623, 0.2727273, 0.2527473, 0.2420382, 0.2262774, 0.2216216, 0.2105263, 0.2009804)
+similarity<-as.data.frame(cbind(userId, JaccardSimilarity))
+row.names(similarity)<-c(1:12)
+similarity$userId<-as.character(similarity$userId)
+similarity$JaccardSimilarity<-JaccardSimilarity
+
+
+sqlStr<-'SELECT movieId, rating
+        FROM ratings
+        WHERE userId=191'
+user191<-sqldf(sqlStr)
+m<-c(150,296,380,590)
+index<-which(user191$movieId%in%m)
+movies191<-user191$rating[index] #we save the actual values of the ratings 
+user191$rating[index]<-NA
+```
+### a) Prediction using user-user similarity
+```{r}
+#We start constructing the utility matrix
+set.seed(1122)
+rowusers<-c(191, sample(similarity$userId, size=5))
+U<-as.data.frame(rowusers)
+U[, as.character(user191$movieId)]<-NA
+rownames(U)<-U$rowusers
+U<-U[,-1]
+
+#We fill the utility matrix
+U[1, which(colnames(U)%in%user191$movieId)]<-user191$rating
+for(i in 2:length(rowusers)){
+  data<-ratings[which(ratings$userId==rowusers[i]&ratings$movieId%in%user191$movieId),]
+  U[i, which(colnames(U)%in%data$movieId)]<-data$rating
+}
+
+#We pick the users with the highest similarities
+N<-similarity[which(similarity$userId%in%rowusers),]
+N<-N[1:3,]
+
+#We compute equation 2 to calculate the predicted rate that user191 would give
+totals<-sum(N$JaccardSimilarity)
+ratesN<-U[which(rownames(U)%in%N$userId), which(colnames(U)%in%m)]
+ratedmovies<-ratesN*N$JaccardSimilarity
+ratedmovies<-(apply(ratedmovies, MARGIN =2, FUN=sum)/totals)
+RMSEfunc<-function(pred, actual){
+  sqrt(sum((pred-actual)^2)/4)
+}
+RMSE<-RMSEfunc(ratedmovies, movies191)
+cat('UserID191, 5 random userIDs:', rowusers[2:6], '\n')
+cat('Using user-user similarity, User ID 191 will rate the movies as follows:\n')
+for(i in 1:length(m)){
+  cat(m[i], ':', ratedmovies[i], '\n')
+}
+cat('RMSE:', RMSE)
+```
+
+### b) Prediction using item-item similarity
+```{r}
+#We start constructing the utility matrix
+set.seed(1122)
+rowmovies<-as.character(user191$movieId)
+U<-as.data.frame(rowmovies)
+colusers<-c(191, sample(similarity$userId, size=5))
+U[, colusers]<-NA
+rownames(U)<-U$rowmovies
+U<-U[,-1]
+
+#We will fill the utility matrix
+U[which(rownames(U)%in%user191$movieId), 1]<-user191$rating
+for(i in 2:length(colusers)){
+  data<-ratings[which(ratings$userId==colusers[i]&ratings$movieId%in%user191$movieId),]
+  U[which(rownames(U)%in%data$movieId), i]<-data$rating
+}
+mean<-apply(U, 1, function(x) mean(x, na.rm=T))
+normalized<-(U-mean)
+normalized[is.na(normalized)]<-0
+
+#We create the similarities for each movie
+cos<-as.data.frame(rowmovies)
+cos[,as.character(m)]<-0
+rownames(cos)<-rowmovies
+cos<-cos[,-1]
+
+for(j in 1:length(m)){
+  cos[,j]<-apply(normalized,MARGIN=1 ,FUN=my.cosine, normalized[which(rownames(cos)==m[j]),])
+}
+
+#We pick the similar items of each movie we want to rate
+c<-cos[order(cos[,1], decreasing=TRUE),]
+similarMovies150<-c[2:4,1] #The first one would be itself
+SimilarItems<-as.data.frame(similarMovies150)
+rownames(SimilarItems)<-rownames(c)[2:4]
+SimilarItems<-SimilarItems[order(rownames(SimilarItems), decreasing=FALSE),1]
+
+Nitems<-U[which(rownames(U)%in%rownames(c)[2:4]),1]
+Nitems[is.na(Nitems)]<-0
+ratingMovies<-sum(SimilarItems*Nitems)/sum(similarMovies150)
+  
+for(i in 2:length(m)){
+  c<-cos[order(cos[,i], decreasing=TRUE),]
+  SimilarItems<-as.data.frame(c[2:4,i])
+  rownames(SimilarItems)<-rownames(c)[2:4]
+  SimilarItems<-SimilarItems[order(rownames(SimilarItems), decreasing=FALSE),1]
+  
+  Nitems<-U[which(rownames(U)%in%rownames(c)[2:4]),1] #1 corresponds to user191
+  Nitems[is.na(Nitems)]<-0
+  ratingMovies<-c(ratingMovies, sum(SimilarItems*Nitems)/sum(c[2:4,i]))
+  
+}
+
+RMSE<-RMSEfunc(ratingMovies, movies191)
+cat('UserID191, 5 random userIDs:', rowusers[2:6], '\n')
+cat('Using user-user similarity, User ID 191 will rate the movies as follows:\n')
+for(i in 1:length(m)){
+  cat(m[i], ':', ratingMovies[i], '\n')
+}
+cat('RMSE:', RMSE)
+```
