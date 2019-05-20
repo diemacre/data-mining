@@ -1,0 +1,44 @@
+---
+title: "CS 422 Section 04"
+output: html_notebook
+author: "Diego Martin Crespo"
+---
+## Problem 1
+
+### 1-A: Cars dataset preparation
+
+```{r}
+attach(cars) 
+cars
+```
+### 1-B: Graph of the dataset
+```{r}
+plot(cars, main="The Cars Dataset")
+```
+1-C: Summary of the cars dataset
+```{r}
+summary(cars)
+```
+1-D: Max and min speed shown in the summary with command
+```{r}
+cat("The maximum speed is:", max(cars$speed))
+cat("\nThe minimum distance is:", min(cars$dist))
+```
+## Problem 2
+
+This is the original information that we have:
+```{r}
+students <- read.csv("../student.csv", sep=";", header=T)
+students
+```
+2-A: Read the file into a data frame:
+```{r}
+newStudent<-data.frame(name="Brad Pitt", id=40051, gpa=2.21, grade="C")
+newStudent$id<-as.integer(newStudent$id)
+newStudent
+```
+The data frame is added as a new row:
+```{r}
+students<-rbind(students,newStudent)
+students
+```

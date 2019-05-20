@@ -1,0 +1,274 @@
+---
+title: "CS 422: Section 04"
+author: "Diego Martin Crespo"
+output: 
+  html_notebook:
+    toc: true
+    toc_float:
+        smoth_scrooll: true
+---
+
+## 2.1 Problem
+
+### a) 
+The excel file is oppened to see if the data has headers and to see what is the separation character that is used. And the file is loaded:
+
+```{r}
+library(dplyr)
+library(psych)
+
+college.df<-read.csv("College.csv",  header=TRUE, sep=',')
+head(college.df)
+```
+
+### b) 
+To count the number of either private or public schools we use the table() function at column private. The result will give two numbers associated to the factor yes and no. "yes" is the number of private schools and "no" is supposed to be the number of public schools.
+```{r}
+table= table(college.df$Private)
+table
+```
+
+### c) 
+We create two dataframes: one conatining the public colleges and other with the private. Also we plot the respective density histograms respect to the PhD students.
+```{r}
+publicColleges <- filter(college.df, Private == "No")
+privateColleges <- filter(college.df, Private == "Yes")
+dp <- density(privateColleges$PhD)
+hist(privateColleges$PhD, main="Private PhD students", xlab="Percent of Private PhD students", ylab="Density of Probability", xlim=range(0:120), breaks=15, col="blue", border = "black", prob = TRUE)
+lines(dp, col="red", lwd=2)
+```
+
+```{r}
+dpp <- density(publicColleges$PhD)
+hist(publicColleges$PhD, main="Public PhD students", xlab="Percent of Public PhD students", ylab="Density of Probability", xlim=range(20:120), breaks=9, col="blue", border = "black", prob = TRUE)
+lines(dpp, col="red", lwd=2)
+```
+
+### d)
+A new data frame is created shorted by Grad.Rate. The top min grades from the colleges are printed.
+```{r}
+college.shoredByGrade <- arrange(college.df, Grad.Rate)
+minGrades <- select(filter(college.shoredByGrade[1:5,]), c("Name", "Grad.Rate"))
+minGrades
+```
+
+Then the top max grades from the colleges are printed.
+```{r}
+maxGrades <- select(filter(tail(college.shoredByGrade,5)), c("Name", "Grad.Rate"))
+maxGrades
+```
+
+### e)
+
+#### i.
+Numerical summary of the variables of the dataset
+```{r}
+summary(college.df)
+```
+#### ii.
+The lower triangle of the matrix shows the scatterplox matrix and the upper triangle shows the linear correlation between them.
+```{r}
+pairs.panels(college.df[,1:10])
+```
+I consider the attributes that are related with each other those that have a value close to 0.5 or higher. 
+#### iii.
+Which alumni donate more to their colleges, those who go to public schools or those who go to private schools?
+```{r}
+boxplot(perc.alumni~Private, data=college.df, main="% of donations per type of university", xlab="Private University", ylab="% alumni that donate", col="blue")
+```
+From the previous boxplot we can see that in general, students that are in a private university donate more money.
+#### iv.
+Which colleges, public or private, employ more Ph.D.'s?
+```{r}
+boxplot(PhD~Private, data=college.df, main="% of PhD per type of university", xlab="Private University", ylab="% PhD students", col="blue")
+```
+From this boxplot, we can observe that the mean number of PhDs hired in each university is close. Although the Public University has a smaller IQR, they hire more PhD's
+#### v.
+Use summary() to see how many elite universities there are
+```{r}
+Elite<-rep("No", nrow(college.df))
+Elite[college.df$Top10perc>50]<-"Yes"
+Elite<-as.factor(Elite)
+college.df<-data.frame(college.df, Elite)
+summary(college.df$Elite)
+```
+There are only 78 Elite universities out of 777, which means that only 11.16% of the universities are Elite.
+#### vi.
+Histrogram with differing number of bins
+```{r}
+par(mfrow=c(2,2))
+hist(college.df$Accept, main="Nº students accepted", xlab="number", xlim=range(0:15000), col="blue")
+hist(college.df$Enroll, main="Nº students enrolled", xlab="number", col="blue")
+hist(college.df$F.Undergrad, main="Nº of full-time undergrad", xlab="number", col="blue")
+hist(college.df$P.Undergrad, main="Nº of part-time undergrad", xlab="number", xlim=range(0:10000), col="blue")
+```
+#### vii.
+```{r}
+totalP<-mean((college.df$Accept-college.df$Enroll)/college.df$Accept)*100
+under<-sum(college.df$P.Undergrad)/(sum(college.df$F.Undergrad)+sum(college.df$P.Undergrad))*100
+```
+  58.798% of the students that are accepted end up enrolling in that university.
+  18.79% of the undergraduates are partially enrolled.
+  
+## 2.2 Problem: LINEAR REGRESSION
+
+### a)
+Cleanning of dataset
+```{r}
+mpg.df<-read.csv("auto-mpg.csv", sep=",", header=TRUE)
+```
+#### i.
+Print and clean attribute horsepower="?"
+```{r}
+removeI= which(mpg.df$horsepower == "?")
+removeI
+mpgI.df= mpg.df[-removeI,]
+```
+#### ii.
+Type of attribute of hoursepower
+```{r}
+str(mpgI.df$horsepower)
+mpgI.df$horsepower<-as.integer(mpgI.df$horsepower)
+str(mpgI.df)
+```
+### b)
+```{r}
+pairs.panels(mpgI.df)
+```
+As it is can be enfered in the previus plot. The displacement and weight are well correlated with the mpg. For instance we peak the displacement. attribute.
+```{r}
+linearMod <- lm( mpg ~ displacement, data=mpgI.df)
+summary(linearMod)
+```
+We get an R^2= 0.6482, this means that arround 65% of the values fit the model.
+The RSE is the average amount that the response will deviate from the true regression line, in this case it is 4.635, which can be better.
+The RMSE is the standard deviation of the residuals (prediction errors). Residuals are a measure of how far from the regression line data points are; RMSE is a measure of how spread out these residuals are. It can be computed as the root square of the MSE, in this case is 2.15.
+
+### c)
+Plot the X-Y (or scatterplot) of the predictor and the regressor.
+```{r}
+plot(mpgI.df$displacement, mpgI.df$mpg, xlab= "Displacement", ylab = "Mpg", main= "Mpg-Displacement & Regression Line")
+abline(linearMod, col="blue")
+```
+
+### d)
+Multi regression variable
+
+```{r}
+set.seed(1122)
+index <- sample(1:nrow(mpgI.df), 0.8*dim(mpgI.df)[1])
+train <- mpgI.df[index, ]
+test <- mpgI.df[-index, ]
+```
+
+#### i.
+
+car.name is not a reasonble option because it is a factor attribute with 305 different levels. The data set is of 392 objects, it makes no sense trying to classify the 392 objects in 305 diffentent levels. The model will predict much worse.
+
+#### ii.
+
+```{r}
+linearModMulti <- lm( formula = mpg ~ cylinders + displacement + horsepower + weight + acceleration + model.year + origin,   data=train)
+summary(linearModMulti)
+```
+
+We get an adjusted R^2= 0.8352, better (closser to one) than in b) using only one attribute.
+The RSE in this case it is 3.188, which also is smaller/better than in b).
+```{r}
+RMSE <- sqrt(mean((train$mpg-linearModMulti$fit)^2))
+RMSE
+```
+
+### e)
+
+#### i.
+From d), the summary shows the attributes that most contribute with ***. Those are: weight, model.year and origin
+```{r}
+linearModMultiC <- lm( formula = mpg ~ weight + model.year + origin,   data=train)
+```
+#### ii.
+```{r}
+summary(linearModMultiC)
+```
+We get an adjusted R^2= 0.8298, smaller than the previus d).
+The RSE in this case it is 3.24, which is greater/worse than in d).
+```{r}
+RMSE <- sqrt(mean((train$mpg-linearModMultiC$fit)^2))
+RMSE
+```
+This results are normal. They are a bit worse than in d), however the results are really close. Therefore, is more computational-efficient to use the attributes that most contribute, seeing these results.
+### f)
+Plot and comment the residuals of the model of (e)(i)
+```{r}
+plot(linearModMultiC,1)
+abline(0,0)
+```
+The line of best fit is close to 0 although at the end it deviates.
+
+### g)
+Plot a histogram of the residuals of the model of (e)(i)
+```{r}
+hist(linearModMultiC$residuals, xlab="Model Residuals", main="mpg Residual Histogram", col = "blue", xlim=range(-10:15), ylim=range(0:100))
+x <- -10:10
+lines(x, 600*dnorm(x, 0, sd(linearModMultiC$residuals)), col=2)
+```
+Yes, the residuals are close to a Gaussian distribution.
+
+### h)
+Prediction of the model
+```{r}
+prediction<-predict(linearModMultiC, newdata=test)
+prediction<-data.frame(prediction)
+prediction$actual<-test$mpg
+prediction
+difference<-prediction[1]-prediction[2]
+difference
+```
+If we look at the diference between both values, we can see that none of the points are exact, but they are close. If we consider the error to be 0:
+```{r}
+sum(abs(difference)<0)
+```
+We see that 0 values out of 79 that fit the model with an error of 0.
+
+### i)
+```{r}
+n <- dim(test)[1]
+p <- 3
+```
+
+#### 1. RSS (Residual Sum of Errors)
+```{r}
+RSS<-sum(difference^2)
+RSS
+```
+  
+#### 2. TSS (Total Sum of Errors)
+  
+```{r}
+ymean<-mean(prediction[,2])
+TSS<-sum((prediction[,2]-ymean)^2)
+TSS
+```
+#### 3. The F-statistic
+```{r}
+F<-((TSS-RSS)/p)/(RSS/(n-p-1))
+F
+```
+#### 4. The RSE (Residual Standard Error)
+```{r}
+RSE<-sqrt(1/(n-p-1)*RSS)
+RSE
+```
+#### The RMSE (Residual Standard Error)
+```{r}
+RMSE <- sqrt(mean((prediction[,2]-prediction[,1])^2))
+RMSE
+```
+From these results we can infer that the model performs quite worse than in the previous cases. For intance, the resulting RSE this time is equal to 3.856, which is greater than 3.24 from e). Also, the F value is smaller than in e). Eventhough the performance is a bit worse than before, the results are really close to their estimation.
+
+
+
+
+
+
+

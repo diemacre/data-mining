@@ -1,0 +1,323 @@
+---
+title: "Homework 2 of CS 422: Section 04"
+author: "Diego Martin Crespo, A20432558"
+output: 
+  html_notebook:
+    toc: true
+    toc_float:
+        smoth_scrooll: true
+---
+
+## 2.1 Decision tree classification
+
+First we set the seeds
+```{r}
+set.seed(1122)
+```
+
+Now we proceed by reading the adult train and test dataset. From the description in the homework we see that they are all factors, so we leave the default, which is true.
+
+```{r}
+adult_train<-read.csv("../adult-train.csv", header=TRUE, sep=',')
+adult_test<-read.csv("../adult-test.csv", header=TRUE, sep=',')
+str(adult_train) #we check that the attributes are from the correct type
+str(adult_test)
+```
+
+```{r}
+adult_train$age<-as.numeric(adult_train$age)
+adult_train$education_num<-as.numeric(adult_train$education_num)
+adult_test$age<-as.numeric(adult_test$age)
+adult_test$education_num<-as.numeric(adult_test$education_num)
+```
+
+
+### a) Remove '?' from any of the attributes.
+```{r}
+summary(adult_train=='?') #we can see where the question marks are
+```
+From this we see that the attributes that have '?' are workclass, native_country and occupation. Therefore we clean those atributes.
+```{r}
+sum(adult_train$workclass=='?')
+index<-which(adult_train$workclass=='?')
+adult_train<-adult_train[-index,]
+sum(adult_train$native_country=='?')
+index<-which(adult_train$native_country=='?')
+adult_train<-adult_train[-index,]
+sum(adult_train$occupation=='?')
+index<-which(adult_train$occupation=='?')
+adult_train<-adult_train[-index,]
+```
+We check to see if there are any values that we missed. It should be 30,161 observations as the problem statement says.
+```{r}
+sum(adult_train=='?')
+str(adult_train)
+```
+Now we continue cleaning the test dataset.
+```{r}
+summary(adult_test=='?') #esto creo que no lo puedo hacer
+```
+We start cleaning the dataset with the attributes that we know have '?':
+```{r}
+sum(adult_test$workclass=='?')
+index<-which(adult_test$workclass=='?')
+adult_test<-adult_test[-index,]
+sum(adult_test$native_country=='?')
+index<-which(adult_test$native_country=='?')
+adult_test<-adult_test[-index,]
+sum(adult_test$occupation=='?')
+index<-which(adult_test$occupation=='?')
+adult_test<-adult_test[-index,]
+```
+We check to see if there are any values that we missed. It should be 15,060 observations as the problem statement says.
+```{r}
+sum(adult_test=='?')
+str(adult_test)
+```
+Now that the datasets are cleaned we can continue with the exercise.
+
+### b) Build a decision tree
+```{r}
+library(rpart)
+library(caret)
+library(gplots)
+library(rpart.plot)
+library(ROCR)
+```
+
+```{r}
+model<-rpart(income~., method="class", data=adult_train)
+rpart.plot(model, type=4, extra=104, fallen.leaves=TRUE, main="Full Tree")
+```
+#### i) the top three predictors are: "relationship, marrial_status and capital_gain"
+####  ii) The first split is done in relationship. The predicted class of the first node is "<=50K". There are 22653 counts for "<=50K" and 7508 counts for ">50K".
+```{r}
+summary(model)
+```
+
+
+
+### c) Use the trained model from b) to predict the test dataset. 
+```{r}
+options("digits"=3) #3 decimal place accuracy
+pred<-predict(model, adult_test, type="class" )
+confusionMatrix(pred, as.factor(adult_test[,15])) #the label is on the 15th column
+```
+#### i) Since there are more examples in the '<=50K' label than in the '>50k' we have to look at the balanced accuracy. In this case its value is 0.726.
+ 
+#### ii) Error = 1 - Balanced accuracy. If we substitute the values, we obtain that the error is 0.274
+ 
+#### iii) Sensitivity = 0.948 this is the ratio of true positives/(true positives +false negatives). Specificity= 0.504 this is a measure of the true negative ratio. It is calculated by true negatives/(true negatives + false positives)
+
+#### iv) The AUC of the ROC curve is 0.843
+```{r}
+pred.rocr <- predict(model, adult_test, type="prob")[,2]
+f.pred <- prediction(pred.rocr, adult_test$income)
+f.perf <- performance(f.pred, "tpr", "fpr")
+plot(f.perf, colorize=T, lwd=3)
+abline(0,1)
+auc <- performance(f.pred, measure = "auc")
+```
+```{r}
+print(auc@y.values)
+```
+### d) Print the complexity table of the model you trained.
+```{r}
+model$cptable
+```
+#### From the complexity table we can see that there is no need for pruning, since the error we obtain for 4 levels is smaller than that obtained for 3 levels.
+
+### e) Solve the class imbalance
+#### i) 
+```{r}
+nclass1<-sum(adult_train=="<=50K") #I consider class 1 as the label "<=50K"
+nclass2<-sum(adult_train==">50K")  #I consider class 2 to be the one with the label ">50K"
+cat("The number of data in the first class is ", nclass1, ".\n")
+cat("The number of data in the second class is ", nclass2, ".")
+```
+
+#### ii) The class with smaller number of observations is ">50K". To obtain the biggest training set, we create a new dataframe with only the observations regarding class1. From there, we select randomly as many observations as number of observations there are of class 2.
+```{r}
+a<-adult_train[adult_train$income==">50K",]
+b<-adult_train[adult_train$income=="<=50K",]
+index<-sample(1:nrow(b), size=nclass2, replace=FALSE)
+new_training<-rbind(a,b[index,])
+stopifnot(sum(new_training$income==">50K")==sum(new_training$income=="<=50K")) #we check that we have the same number of observations for each class.
+```
+#### iii) Train a new model on the new training dataset
+
+```{r}
+newM<-rpart(income~., method="class", data=new_training)
+#rpart.plot(newM, type=4, extra=104, fallen.leaves=TRUE, main="Full Tree")
+```
+
+```{r}
+newP<-predict(newM, adult_test, type="class") #I haven't balanced the test data
+confusionMatrix(newP,adult_test[,15])
+```
+#####  i) The Balanced Accuracy is 0.809 
+  
+#####  ii) Balanced error=1-Balanced Accuracy=0.191
+  
+#####  iii) Sensitivity=0.782 ; Specificity=0.835
+  
+#####  iv) AUC of 0.846 and ROC Curve:
+  
+```{r}
+new.roc<-predict(newM, adult_test, type='prob')[,2]
+npred<-prediction(new.roc, adult_test$income)
+nperfor<-performance(npred, "tpr", "fpr")
+plot(nperfor, colorize=T, lwd=3)
+abline(0,1)
+auc<-performance(npred, measure="auc")
+```
+```{r}
+print(auc@y.values)
+```
+
+### f) Diferences between balanced accuracy, sensitivity, specificity, positive predictive value and AUC of the models used in (c) and (e).
+
+#### The sensitivity and specificity depend on the number of observations on each class. Since the training set has decreased, the model can pick up less patterns for the labels, which results in a lower value for the sensitivity. 
+#### The specificity is higher because there is a more even distribution of the labels in the set. Therefore, there is a greater chance of obtaining the true negatives. 
+#### The second model has slightly higher area under the curve, so the model is better. 
+
+## 2.2 Random Forest
+
+```{r}
+library(randomForest)
+library(ggplot2)
+set.seed(1122)
+```
+### a) Create a Random Forest model using the entire training dataset
+```{r}
+rmodel<-randomForest(income~., data=adult_train,importance=TRUE)
+rpred<-predict(rmodel, adult_test, type="class")
+confusionMatrix(rpred, adult_test$income)
+```
+####  i) The Balanced Accuracy=0.784
+
+####  ii) The Accuracy=0.858
+  
+####  iii) Sensitivity=0.930 and Specificity=0.638
+  
+####  iv) the class distribution has 11360 observations <=50k and 3700 >50k.
+  
+```{r}
+table(adult_test$income)
+```
+
+####  v) It makes sense that the sensitivity is higher than the specificity since there are more observations for the "<=50K" label (positive class) than for the ">50K" (negative class). Since I have more positive observations, the model can pick up more patterns for them, thus resulting in a higher sensitivity.
+
+####  vi) 
+#### The most important variable for MeanDecreaseAccuracy is the capital gain. The least important one is fnlwgt since it has no effect in the accuracy.
+
+#### The most important variable for MeanDecreaseGini is relationship as it has the highest Gini decrease. In that note, the least important one is the race. 
+```{r}
+varImpPlot(rmodel)
+```
+
+
+####  vii) The number of variables tried at each split is 3. This is the number of variables used for each subtree.
+```{r}
+print(rmodel)
+```
+
+
+### b) Find out what is the best value to use for number of predictors to select at each split.
+```{r}
+X<-adult_train[,1:14]
+Y<-adult_train[,15]
+mtry <- tuneRF(X, Y, ntreeTry=500, stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+```
+####  i) The default value of mtry is 3.
+  
+####  ii) From the table below, we can see that the lowest error = 0.137 is given by a mtry of 2 and it is the optimal value.
+```{r}
+print(mtry)
+```
+####  iii) Using the mtry value from ii)
+```{r}
+m2<-randomForest(income~., adult_train, importance=TRUE, mtry=2)
+p2<-predict(m2, adult_test, type="class")
+confusionMatrix(p2, adult_test$income)
+```
+#####  1. The Balanced Accuracy is 0.784
+  
+#####  2. The accuracy of the model is 0.86
+  
+#####  3. The sensitivity is 0.935 and the specificity is 0.633
+  
+#####  4. 
+
+##### The most important variable for MeanDecreaseAccuracy is still capital gain, although the decrease it has is much less than before. The least important variable is still fnlwgt.
+
+##### For MeanDecreaseGini the most important variable now is capital gain. And the least important variable is race. 
+
+```{r}
+varImpPlot(m2)
+```
+
+
+####  iv) By using 2 predictor variables for the split instead of 3 as in 2.2 a). The obtained values of accuracy, balanced accuracy, sensitivity, specificity do not variate. On the other hand the variable importance in this case for the MeanDecreaseGini changed from relationship to capital_gain as the most optimal.
+  
+  
+## 2.3 Association Rules
+
+First, we load the association rules packages and the transaction dataframe.
+```{r}
+library(arules)
+library(arulesViz)
+library(arules)
+library(grid)
+groceries<-read.transactions(file="../groceries.csv", format="basket", sep=",")
+```
+
+### i) How many rules do you get at this support value?
+#### A support value of 0.1 is too high and we get 0 rules.
+```{r}
+rules<-apriori(groceries)
+summary(rules)
+```
+
+### ii) Manipulate the support value so you get at least 400 rules
+#### With a support=0.001 we get 410 rules.
+```{r}
+rules<-apriori(groceries, parameter=list(supp=0.001))
+summary(rules)
+```
+
+### iii) Which item is the most frequently bought and what is its frequency?
+#### The "whole milk" is the most frequently bought item, with a frequency of 0.256
+```{r}
+items<-sort(itemFrequency(groceries), decreasing=T)
+items[1]
+```
+
+### iv) Which item is the least frequently bought and what is its frequency?
+#### The least frequently bought item is "rubbing alcohol" with a frequency of 0.00102.
+```{r}
+last<-sort(itemFrequency(groceries), decreasing=F)
+last<-last[last>=0.001]
+last[1]
+```
+
+### v) What are the top 5 rules, sorted by support?
+```{r}
+inspect(head(rules, n=5, by="support"))
+```
+
+### vi) What are the top 5 rules, sorted by confidence?
+```{r}
+inspect(head(rules, n=5, by="confidence"))
+```
+
+### vii) What are the bottom 5 rules, sorted by support?
+```{r}
+inspect(tail(rules, n=5, by="support"))
+```
+
+### viii) What are the bottom 5 rules, sorted by confidence?
+```{r}
+inspect(tail(rules, n=5, by="confidence"))
+```
+
